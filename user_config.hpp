@@ -1,101 +1,140 @@
 #pragma once
 
-#include <nan.h>
+#include <node.h>
+#include <node_object_wrap.h>
 
 #include "base_config.hpp"
 
 #include "session/config/user_profile.hpp"
 
+using v8::Context;
+using v8::Exception;
+using v8::Function;
+using v8::FunctionCallbackInfo;
+using v8::FunctionTemplate;
+using v8::Isolate;
+using v8::Local;
+using v8::Number;
+using v8::Object;
+using v8::ObjectTemplate;
+using v8::String;
+using v8::Undefined;
+using v8::Value;
+
 class UserConfigWrapper : public ConfigBaseWrapper
 {
 public:
-  static NAN_MODULE_INIT(Init)
+  static void Init(v8::Local<v8::Object> exports)
   {
-    v8::Local<v8::FunctionTemplate> tpl = Nan::New<v8::FunctionTemplate>(New);
-    tpl->SetClassName(Nan::New("UserConfigWrapper").ToLocalChecked());
+    Isolate *isolate = exports->GetIsolate();
+    Local<Context> context = isolate->GetCurrentContext();
+
+    Local<ObjectTemplate> addon_data_tpl = ObjectTemplate::New(isolate);
+    addon_data_tpl->SetInternalFieldCount(1); // 1 field for the UserConfigWrapper::New()
+    Local<Object> addon_data =
+        addon_data_tpl->NewInstance(context).ToLocalChecked();
+
+    // Prepare constructor template
+    Local<FunctionTemplate> tpl = FunctionTemplate::New(isolate, New, addon_data);
+    tpl->SetClassName(String::NewFromUtf8(isolate, "UserConfigWrapper").ToLocalChecked());
     tpl->InstanceTemplate()->SetInternalFieldCount(1);
 
+    // Prototype
+    NODE_SET_PROTOTYPE_METHOD(tpl, "getName", GetName);
+    NODE_SET_PROTOTYPE_METHOD(tpl, "setName", SetName);
     SESSION_LINK_BASE_CONFIG
 
-    Nan::SetPrototypeMethod(tpl, "getName", GetName);
-    Nan::SetPrototypeMethod(tpl, "setName", SetName);
-
-    // constructor().Reset(Nan::GetFunction(tpl).ToLocalChecked());
-    Nan::Set(target, Nan::New("UserConfigWrapper").ToLocalChecked(),
-             Nan::GetFunction(tpl).ToLocalChecked());
+    Local<Function> constructor = tpl->GetFunction(context).ToLocalChecked();
+    addon_data->SetInternalField(0, constructor);
+    exports->Set(context, String::NewFromUtf8(isolate, "UserConfigWrapper").ToLocalChecked(),
+                 constructor)
+        .FromJust();
   }
 
 private:
-  // session::config::UserProfile *userProfile;
-
   explicit UserConfigWrapper()
   {
     initWithConfig(new session::config::UserProfile());
   }
+  ~UserConfigWrapper() {}
 
-  ~UserConfigWrapper()
+  static void New(const v8::FunctionCallbackInfo<v8::Value> &args)
   {
-  }
 
-  static NAN_METHOD(New)
-  {
-    v8::Local<v8::Context> context = info.GetIsolate()->GetCurrentContext();
+    Isolate *isolate = args.GetIsolate();
 
-    if (info.IsConstructCall())
+    if (args.IsConstructCall())
     {
+      // Invoked as constructor: `new UserConfigWrapper(...)`
       UserConfigWrapper *obj = new UserConfigWrapper();
-      obj->Wrap(info.This());
-      info.GetReturnValue().Set(info.This());
+      obj->Wrap(args.This());
+      args.GetReturnValue().Set(args.This());
+      return;
     }
     else
     {
-      Nan::ThrowError("You need to call the constructor with the `new` syntax");
+      // Invoked as plain function `MyObject(...)`, turn into construct call throw
+      isolate->ThrowException(Exception::TypeError(
+          String::NewFromUtf8(isolate,
+                              "Only syntax with new is supported")
+              .ToLocalChecked()));
       return;
     }
   }
 
-  static NAN_METHOD(GetName)
+  static void GetName(const v8::FunctionCallbackInfo<v8::Value> &args)
   {
-    v8::Isolate *isolate = info.GetIsolate();
+    Isolate *isolate = args.GetIsolate();
 
-    UserConfigWrapper *obj = Nan::ObjectWrap::Unwrap<UserConfigWrapper>(info.Holder());
+    UserConfigWrapper *obj = ObjectWrap::Unwrap<UserConfigWrapper>(args.Holder());
     auto asUserProfile = static_cast<session::config::UserProfile *>(obj->config);
-
     auto name = asUserProfile->get_name();
-    if (name == NULL)
+    if (name == nullptr)
     {
-      info.GetReturnValue().Set(Nan::Null());
+      args.GetReturnValue().Set(Null(isolate));
     }
     else
     {
-      info.GetReturnValue().Set(v8::String::NewFromUtf8(isolate, name->c_str()).ToLocalChecked());
+      args.GetReturnValue().Set(v8::String::NewFromUtf8(isolate, name->c_str()).ToLocalChecked());
     }
   }
 
-  static NAN_METHOD(SetName)
+  static void SetName(const v8::FunctionCallbackInfo<v8::Value> &args)
   {
-    v8::Isolate *isolate = info.GetIsolate();
-    v8::Local<v8::Context> context = isolate->GetCurrentContext();
+    v8::Isolate *isolate = args.GetIsolate();
 
-    if (info.Length() != 1)
+    if (args.Length() != 1)
     {
-      Nan::ThrowTypeError("Wrong number of arguments");
+      isolate->ThrowException(Exception::TypeError(
+          String::NewFromUtf8(isolate,
+                              "Wrong number of arguments")
+              .ToLocalChecked()));
       return;
     }
 
-    if (!info[0]->IsString() && !info[0]->IsNull())
+    if (!args[0]->IsString() && !args[0]->IsNull())
     {
-      Nan::ThrowTypeError("Wrong arguments");
+
+      isolate->ThrowException(Exception::TypeError(
+          String::NewFromUtf8(isolate,
+                              "Wrong arguments")
+              .ToLocalChecked()));
       return;
     }
 
-    v8::String::Utf8Value str(isolate, info[0]);
+    v8::String::Utf8Value str(isolate, args[0]);
     std::string cppStr(*str);
 
-    UserConfigWrapper *obj = Nan::ObjectWrap::Unwrap<UserConfigWrapper>(info.Holder());
+    UserConfigWrapper *obj = ObjectWrap::Unwrap<UserConfigWrapper>(args.Holder());
     auto asUserProfile = static_cast<session::config::UserProfile *>(obj->config);
+
     asUserProfile->set_name(cppStr);
   }
 };
 
-NODE_MODULE(session_util_wrapper, UserConfigWrapper::Init)
+void InitAll(Local<Object> exports)
+{
+  UserConfigWrapper::Init(exports);
+}
+
+NODE_MODULE(session_util_wrapper, InitAll)
