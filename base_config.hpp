@@ -1,31 +1,59 @@
 #pragma once
 
-#include <nan.h>
+#include <node.h>
+#include <node_object_wrap.h>
 #include "session/config/base.hpp"
 
-#define SESSION_LINK_BASE_CONFIG                        \
-  Nan::SetPrototypeMethod(tpl, "needsDump", NeedsDump); \
-  Nan::SetPrototypeMethod(tpl, "needsPush", NeedsPush);
+using v8::Context;
+using v8::Exception;
+using v8::Function;
+using v8::FunctionCallbackInfo;
+using v8::FunctionTemplate;
+using v8::Isolate;
+using v8::Local;
+using v8::Number;
+using v8::Object;
+using v8::ObjectTemplate;
+using v8::String;
+using v8::Value;
 
-class ConfigBaseWrapper : public Nan::ObjectWrap
+#define SESSION_LINK_BASE_CONFIG                          \
+  NODE_SET_PROTOTYPE_METHOD(tpl, "needsDump", NeedsDump); \
+  NODE_SET_PROTOTYPE_METHOD(tpl, "needsPush", NeedsPush);
+
+class ConfigBaseWrapper : public node::ObjectWrap
 {
 public:
-  static NAN_MODULE_INIT(Init)
+  static void Init(v8::Local<v8::Object> exports)
   {
-    v8::Local<v8::FunctionTemplate> tpl = Nan::New<v8::FunctionTemplate>(New);
-    tpl->SetClassName(Nan::New("ConfigBaseWrapper").ToLocalChecked());
+
+    Isolate *isolate = exports->GetIsolate();
+    Local<Context> context = isolate->GetCurrentContext();
+
+    Local<ObjectTemplate> addon_data_tpl = ObjectTemplate::New(isolate);
+    addon_data_tpl->SetInternalFieldCount(1); // 1 field for the ConfigBaseWrapper::New()
+    Local<Object> addon_data =
+        addon_data_tpl->NewInstance(context).ToLocalChecked();
+
+    // Prepare constructor template
+    Local<FunctionTemplate> tpl = FunctionTemplate::New(isolate, New, addon_data);
+    tpl->SetClassName(String::NewFromUtf8(isolate, "ConfigBaseWrapper").ToLocalChecked());
     tpl->InstanceTemplate()->SetInternalFieldCount(1);
 
-    // constructor().Reset(Nan::GetFunction(tpl).ToLocalChecked());
-    Nan::Set(target, Nan::New("ConfigBaseWrapper").ToLocalChecked(),
-             Nan::GetFunction(tpl).ToLocalChecked());
+    Local<Function> constructor = tpl->GetFunction(context).ToLocalChecked();
+    addon_data->SetInternalField(0, constructor);
+    exports->Set(context, String::NewFromUtf8(isolate, "UserConfigWrapper").ToLocalChecked(),
+                 constructor)
+        .FromJust();
   }
 
 protected:
+  session::config::ConfigBase *config;
+
   void initWithConfig(session::config::ConfigBase *config)
   {
 
-    config = config;
+    this->config = config;
   }
 
   ~ConfigBaseWrapper()
@@ -39,44 +67,46 @@ protected:
   }
   ConfigBaseWrapper()
   {
-    config = NULL;
+    config = nullptr;
   }
-
-  static NAN_METHOD(NeedsDump)
+  static void NeedsDump(const v8::FunctionCallbackInfo<v8::Value> &args)
   {
-    ConfigBaseWrapper *obj = Nan::ObjectWrap::Unwrap<ConfigBaseWrapper>(info.Holder());
-    info.GetReturnValue().Set(obj->config->needs_dump());
+    ConfigBaseWrapper *obj = ObjectWrap::Unwrap<ConfigBaseWrapper>(args.Holder());
+    args.GetReturnValue().Set(obj->config->needs_dump());
     return;
   }
 
-  static NAN_METHOD(NeedsPush)
+  static void NeedsPush(const v8::FunctionCallbackInfo<v8::Value> &args)
   {
-    ConfigBaseWrapper *obj = Nan::ObjectWrap::Unwrap<ConfigBaseWrapper>(info.Holder());
-    info.GetReturnValue().Set(obj->config->needs_push());
+    ConfigBaseWrapper *obj = ObjectWrap::Unwrap<ConfigBaseWrapper>(args.Holder());
+    args.GetReturnValue().Set(obj->config->needs_push());
   }
 
-  session::config::ConfigBase *config;
-
 private:
-  static NAN_METHOD(New)
+  static void New(const v8::FunctionCallbackInfo<v8::Value> &args)
   {
-    v8::Local<v8::Context> context = info.GetIsolate()->GetCurrentContext();
+    v8::Isolate *isolate = args.GetIsolate();
 
-    if (info.IsConstructCall())
+    if (args.IsConstructCall())
     {
-      if (info.Length() != 0)
+      if (args.Length() != 0)
       {
-
-        Nan::ThrowTypeError("Wrong number of arguments");
+        isolate->ThrowException(Exception::TypeError(
+            String::NewFromUtf8(isolate,
+                                "Wrong number of arguments")
+                .ToLocalChecked()));
         return;
       }
       ConfigBaseWrapper *obj = new ConfigBaseWrapper();
-      obj->Wrap(info.This());
-      info.GetReturnValue().Set(info.This());
+      obj->Wrap(args.This());
+      args.GetReturnValue().Set(args.This());
     }
     else
     {
-      Nan::ThrowError("You need to call the constructor with the `new` syntax");
+      isolate->ThrowException(Exception::TypeError(
+          String::NewFromUtf8(isolate,
+                              "You need to call the constructor with the `new` syntax")
+              .ToLocalChecked()));
       return;
     }
   }
